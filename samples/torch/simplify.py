@@ -47,7 +47,7 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
         mp4save_interval = None
 
     datadir = f'{pathlib.Path(__file__).absolute().parents[1]}/data'
-    fn = "30501_LianPo_Mid.obj"
+    fn = "10700_ZhaoYun_Low.obj"
     refer_mesh = pywavefront.Wavefront(f'{datadir}/{fn}', collect_faces=True, create_materials=True)
 
     pos_idx = None
@@ -83,7 +83,7 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
     vtx_normal = vtx_normal.contiguous().cuda()
     vtx_color = torch.zeros(vtx_pos.shape[0], 3).cuda()
 
-    fn = "10501_LianPo_D_Lod.png"
+    fn = "10700_ZhaoYun_D_Lod.png"
     tex = imageio.imread(f'{datadir}/{fn}', as_gray=False, pilmode="RGB")
     tex = np.array(tex).astype(np.float32) / 255.0
     tex = torch.from_numpy(tex.astype(np.float32)).cuda()
@@ -100,7 +100,7 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
 
         for epoch in range(max_iter + 1):
             r_rot = util.random_rotation_translation(0.25)
-            a_rot = np.matmul(util.rotate_x(-0.4), util.rotate_y(ang))
+            a_rot = np.matmul(util.rotate_y(ang), util.rotate_x(1.57))
 
             proj = util.projection(x=0.4, n=1., f=10.0)
             r_mv = np.matmul(util.translate(0, -1.5, -5.5), r_rot)
