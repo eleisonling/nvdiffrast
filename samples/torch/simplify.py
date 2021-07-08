@@ -1,4 +1,5 @@
 import argparse
+from nvdiffrast.torch.ops import texture
 import os
 import imageio
 import pathlib
@@ -9,6 +10,7 @@ import nvdiffrast.torch as dr
 import util
 
 
+
 def transform_pos(mtx, pos):
     t_mtx = torch.from_numpy(mtx).cuda() if isinstance(mtx, np.ndarray) else mtx
     # (x,y,z) -> (x,y,z,1)
@@ -16,11 +18,11 @@ def transform_pos(mtx, pos):
     return torch.matmul(posw, t_mtx.t())[None, ...]
 
 
-def render(glctx, mtx, pos, pos_idx, vtx_col, resolution: int):
+def render_refer(glctx, mtx, pos, uv, tex, pos_idx, resolution: int):
     pos_clip = transform_pos(mtx, pos)
-    rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution])
-    color, _ = dr.interpolate(vtx_col[None, ...], rast_out, pos_idx)
-    color = dr.antialias(color, rast_out, pos_clip, pos_idx)
+    rast_out, rast_out_db = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution])
+    texc, texd = dr.interpolate(uv[None, ...], rast_out, pos_idx, rast_db=rast_out_db, diff_attrs='all')
+    color = dr.texture(tex[None, ...], texc, filter_mode='linear')
     return color
 
 
@@ -53,6 +55,7 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
     vtx_tex = None
     vtx_normal = None
     vtx_color = None
+    tex = None
 
     for mesh in refer_mesh.mesh_list:
         face = torch.tensor(mesh.faces, dtype=torch.int32)
@@ -70,14 +73,20 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
 
         vertex = torch.tensor([mesh.materials[0].vertices[5::8], mesh.materials[0].vertices[6::8],
                                mesh.materials[0].vertices[7::8]])
-        vertex = vertex.T
+        vertex = vertex.T * 0.01
         vtx_pos = vertex if vtx_pos is None else torch.cat((vtx_pos, vertex))
 
     print("Mesh has %d triangles and %d vertices." % (pos_idx.shape[0], vtx_pos.shape[0]))
-    pos_idx = pos_idx.cuda()
-    vtx_pos = vtx_pos.cuda()
-    vtx_normal = vtx_normal.cuda()
-    vtx_color = torch.ones(vtx_pos.shape[0], 3).cuda()
+    pos_idx = pos_idx.contiguous().cuda()
+    vtx_tex = vtx_tex.contiguous().cuda()
+    vtx_pos = vtx_pos.contiguous().cuda()
+    vtx_normal = vtx_normal.contiguous().cuda()
+    vtx_color = torch.zeros(vtx_pos.shape[0], 3).cuda()
+
+    fn = "10501_LianPo_D_Lod.png"
+    tex = imageio.imread(f'{datadir}/{fn}', as_gray=False, pilmode="RGB")
+    tex = np.array(tex).astype(np.float32) / 255.0
+    tex = torch.from_numpy(tex.astype(np.float32)).cuda()
 
     glctx = dr.RasterizeGLContext()
 
@@ -93,10 +102,10 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
             r_rot = util.random_rotation_translation(0.25)
             a_rot = np.matmul(util.rotate_x(-0.4), util.rotate_y(ang))
 
-            proj = util.projection(x=0.4, n=1., f=1000.0)
-            r_mv = np.matmul(util.translate(0, 0, -500.5), r_rot)
+            proj = util.projection(x=0.4, n=1., f=10.0)
+            r_mv = np.matmul(util.translate(0, -1.5, -5.5), r_rot)
             r_mvp = np.matmul(proj, r_mv).astype(np.float32)
-            a_mv = np.matmul(util.translate(0, 0, -500.5), a_rot)
+            a_mv = np.matmul(util.translate(0, -1.5, -5.5), a_rot)
             a_mvp = np.matmul(proj, a_mv).astype(np.float32)
 
             # show/same image
@@ -105,7 +114,7 @@ def simplification(max_iter=5000, resolution=4, discontinuous=False, repeats=1, 
 
             if display_image or save_mp4:
                 ang = ang + 0.01
-                img_r = render(glctx, a_mvp, vtx_pos, pos_idx, vtx_color, display_res)[0]
+                img_r = render_refer(glctx, a_mvp, vtx_pos, vtx_tex, tex, pos_idx, display_res)[0]
 
                 result_image = make_grid(np.stack([img_r.detach().cpu().numpy(), img_r.detach().cpu().numpy()]))
 
